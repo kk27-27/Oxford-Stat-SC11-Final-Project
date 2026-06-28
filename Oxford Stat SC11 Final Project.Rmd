@@ -1,7 +1,7 @@
 ---
 title: "Oxford Stat SC11 Final Project: An Investigation into the Use of ENSO Indicators for Predicting California Winter Precipitation"
 author: "Kevin Kurti"
-date: "2026-06-25"
+date: "June 2026"
 output: pdf_document
 ---
 
