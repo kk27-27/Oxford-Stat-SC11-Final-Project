@@ -1,5 +1,221 @@
 ---
-title: "Oxford Stat SC11 Final Project"
-output: html_document
+title: "Oxford Stat SC11 Final Project: An Investigation into the Use of ENSO Indicators for Predicting California Winter Precipitation"
+author: "Kevin Kurti"
+date: "2026-06-25"
+output: pdf_document
 ---
 
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+**1. Introduction**
+\paragraph{}
+California is the largest state in the United States by population, with a total surpassing 39 million individuals, and is home to the second largest city in the United States, Los Angeles. At the same time, however, it is the leading state for agricultural production, outputting nearly \$60 billion worth of agricultural goods each year across 400 commodity crops, and supplying a third of the entire country's vegetables, and three-quarters of the entire country's fruits and nuts. It is thus significant from an economic, agricultural, and societal standpoint to understand how the ongoing impact of climate change affects weather in California, particularly in the context of water, the primary necessity for agricultural production; this statement is no better exemplified than by the 2014-2016 drought costing almost \$4 billion for the state. Generally, Californian climate is such that the summers are drier and hotter, with the vast majority of precipitation coming in the winter months, and thus being able to predict Californian winter precipitation is a valuable task towards improving the management of water resources and preventing the effects of extreme drought. To that end, we seek to determine whether the use of El Niño-Southern Oscillation (ENSO), a naturally occurring 2-7 year climate cycle in the tropical Pacific Ocean, improves the predictive ability of California winter precipitation forecasts relative to models based solely on historical precipitation, with the aim of making a final recommendation to the California Department of Water Resources as to whether ENSO should be incorporated into future modeling and planning.   
+
+```{r, echo = FALSE, warning = FALSE, message = FALSE}
+# load in data sources for El Nino and for california precipitation 
+nino.data <- read.table("https://www.cpc.ncep.noaa.gov/data/indices/oni.ascii.txt", header = TRUE)
+nino.data2 <- read.table("https://www.cpc.ncep.noaa.gov/data/indices/sstoi.indices", header = TRUE)
+nino.data3 <- read.table("https://www.cpc.ncep.noaa.gov/products/analysis_monitoring/ensostuff/detrend.nino34.ascii.txt", header = TRUE)
+cal.precip.data <- read.csv("data.csv", skip = 2)
+
+# clean data
+library(tidyverse)
+library(dplyr)
+
+cal.precip.data.cleaned <- cal.precip.data %>%
+  mutate(Date = as.character(Date), Year = as.numeric(substr(Date, 1, 4)), Month = as.numeric(substr(Date, 5, 6)))
+cal.winter.precip <- cal.precip.data.cleaned %>%
+  mutate(WinterYear = ifelse(Month == 12, Year + 1, Year)) %>%
+  filter(Month %in% c(12, 1, 2)) %>%
+  group_by(WinterYear) %>%
+  summarise(WinterPrecip = sum(Value), n_months = n(), .groups = "drop") %>%
+  filter(n_months == 3) %>%
+  filter(WinterYear >= 1951)
+
+cal.winter.precip <- cal.winter.precip[, c("WinterYear", "WinterPrecip")]
+
+nino.son <- nino.data %>%
+  filter(SEAS == "SON") %>%
+  transmute(Year = YR, SON_ONI = ANOM, WinterYear = YR + 1)
+nino.son2 <- nino.data2 %>%
+  filter(MON %in% c(9, 10, 11)) %>%
+  group_by(YR) %>%
+  summarise(SON_Nino12 = mean(ANOM), SON_Nino3 = mean(ANOM.1), SON_Nino4 = mean(ANOM.2), SON_Nino34 = mean(ANOM.3), .groups = "drop") %>%
+  mutate(WinterYear = YR + 1) %>%
+  dplyr::select(WinterYear, SON_Nino12, SON_Nino3, SON_Nino4, SON_Nino34)
+nino.son3 <- nino.data3 %>%
+  filter(MON %in% c(9, 10, 11)) %>%
+  group_by(YR) %>%
+  summarise(SON_Nino34_Adjusted = mean(ANOM, na.rm = TRUE), .groups = "drop") %>%
+  mutate(WinterYear = YR + 1) %>%
+  dplyr::select(WinterYear, SON_Nino34_Adjusted)
+
+# primary ENSO indicator-precipitation dataset (starts at 1950)
+final.data <- cal.winter.precip %>%
+  inner_join(nino.son, by = "WinterYear")
+
+# secondary dataset with climate change adjusted ENSO (starts at 1950)
+final.data2 <- cal.winter.precip %>%
+  inner_join(nino.son3, by = "WinterYear")
+
+# tertiary dataset with more ENSO indicators (Nino 1+2, 3, 4, 3.4) and climate-adjusted ENSO (starts at 1982)
+final.data3 <- cal.winter.precip %>%
+  inner_join(nino.son, by = "WinterYear") %>% 
+  inner_join(nino.son2, by = "WinterYear") %>%
+  inner_join(nino.son3, by = "WinterYear")
+```
+
+**2. Data Sources and Exploratory Analysis**
+\paragraph{}
+There are two primary datasets utilised to answer the research question. The first of those is the National Oceanic and Atmospheric Administration (NOAA) Oceanic Niño Index (ONI), which records the three-month running means of sea surface temperatures, measured in the Niño 3.4 region (between 5° North and 5° South latitude, and 170° West to 120° West longitude), and their anomalies, which are calculated by subtracting the 30-year long-term average for that three-month period, known as the climatology. As a result, there is an adjustment for the long-term impact of modern climate change on sea surface temperature, since the data extracts the fact that sea surface temperatures are getting hotter on average, which has the potential to make many modern readings appear to be El Niño events relative to the 30-year average. We are interested in the anomalies more so than the actual surface temperature, since it is known that El Niño Southern Oscillation generally undergoes three phases over the course of the 2-7 years: El Niño, the warm phase, defined as five consecutive overlapping three-month anomalies at $>$ 0.5°C, La Niña, the cold phase, defined as five consecutive three-month anomalies at $<$ 0.5°C, and the neutral phase, in which one period transitions to another and temperatures remain around their long-term averages. This dataset records ONI values beginning from the 1950 December-January-February (DJF) period of 1950, with a total of 916 observations and no missing values. 
+\paragraph{}
+The second dataset originates from the NOAA Climate at a Glance climate monitoring information center, and is a monthly time series of California precipitation amounts, measured in inches, beginning in January 1895. It contains 1577 monthly measurements and no missing values. For the analysis, we remove the California precipitation data prior to winter 1951, given that ONI recordings began in 1950. We also only include ONI values for the three-month September-October-November (SON) period, since these values will have the strongest indication of the predictive impact on California winter precipitation, which we define as the cumulative precipitation in the months of December, January, and February. Therefore, our final analysis is contained within a dataset of the SON ONI anomaly value preceding the DJF precipitation amount. 
+
+```{r, echo = FALSE, warning = FALSE, message = FALSE, fig.height = 8, fig.width = 12, fig.cap = "In the first row, time series of California winter precipitation and SON ONI from 1950 to 2026, and in the second row, their univariate distributions. In the bottom row, on the left, a scatterplot depicting the relationship between California winter precipitation and SON ONI, and on the right, a boxplot depicting the relationship between the two variables distinguished across the three phases of ENSO."}
+# exploratory data analysis
+library(ggplot2)
+library(gridExtra)
+library(tseries)
+library(forecast)
+library(ggrepel)
+
+# basic summary stats
+# summary(final.data)
+# sd(final.data$WinterPrecip)
+# sd(final.data$SON_ONI)
+
+# time series and histograms for precipitation and son oni
+precip.tseries <- ggplot(final.data, aes(x = WinterYear, y = WinterPrecip)) +
+  geom_line(colour = "steelblue") +
+  geom_point() +
+  labs(x = "Winter Year", y = "Winter Precipitation (inches)", title = "California Winter Precipitation Time Series (1951-2026)") + theme_minimal()
+
+son.tseries <- ggplot(final.data, aes(x = WinterYear, y = SON_ONI)) +
+  geom_line(colour = "firebrick") +
+  geom_point() +
+  labs(x = "Winter Year", y = "SON ONI anomaly (°C)", title = "September–November ONI Time Series (1950-2026)") +
+  theme_classic()
+
+precip.hist <- ggplot(final.data, aes(WinterPrecip)) +
+  geom_histogram(bins = 10, fill = "steelblue", colour = "black") + labs(x = "Winter Precipitation (inches)", y = "", title = "Distribution of California Winter Precipitation") + 
+  theme_classic()
+
+son.hist <- ggplot(final.data, aes(SON_ONI)) +
+  geom_histogram(bins = 10, fill = "firebrick", colour = "black") + labs(x = "September-November ONI Anomaly (°C)", y = "", title = "Distribution of September-November ONI Anomaly") +
+  theme_classic()
+
+top_years <- final.data %>% slice_max(WinterPrecip, n = 10) # extract 10 wettest winters
+
+precip.vs.son <- ggplot(final.data, aes(x = SON_ONI, y = WinterPrecip)) + geom_point(size = 2) + geom_text_repel(data = top_years, aes(label = WinterYear),size = 3) + geom_smooth(method = "lm", se = TRUE, colour = "blue") + labs(x = "SON ONI anomaly (°C)", y = "Winter Precipitation (inches)", title = "California Winter Precipitation vs. SON ONI Anomaly") + theme_classic() # scatterplot of precip vs. son oni anomaly
+
+# cor(final.data$WinterPrecip, final.data$SON_ONI) # 0.196
+# cor.test(final.data$WinterPrecip, final.data$SON_ONI) # insignifcant
+
+# add in El Nino/La Nina indicator variable
+final.data <- final.data %>%
+  mutate(ENSO = case_when(SON_ONI >= 0.5 ~ "El Niño", SON_ONI <= -0.5 ~ "La Niña", TRUE ~ "Neutral"))
+
+# new summary stats by 3 categories
+# final.data %>% group_by(ENSO) %>%
+#  summarise(n = n(), Mean = mean(WinterPrecip), Median = median(WinterPrecip), SD = sd(WinterPrecip), Min = min(WinterPrecip), Max = max(WinterPrecip), Q1 = quantile(WinterPrecip, 0.25), Q3 = quantile(WinterPrecip, 0.75))
+
+# boxplot showing precipitation among diff phases of soi 
+son.box <- ggplot(final.data, aes(x = ENSO, y = WinterPrecip, fill = ENSO)) + geom_boxplot() + labs(x = "ENSO Stages", y = "Winter Precipitation (inches)", title = "California Winter Precipitation Across Stages of ENSO") + theme_classic() + guides(fill = "none")
+
+grid.arrange(precip.tseries, son.tseries, precip.hist, son.hist, precip.vs.son, son.box, nrow = 3)
+```
+
+```{r, echo = FALSE, warning = FALSE, message = FALSE, fig.height = 6, fig.width = 12, fig.cap = "Plots of the autocorrelation and partial autocorrelation functions for winter precipitation. There is no obvious trend or non-stationarity."}
+# ACF and PACF for stationarity testing
+acf.plot <- ggAcf(final.data$WinterPrecip) + labs(title = "Autocorrelation Function") + theme_classic()
+pacf.plot <- ggPacf(final.data$WinterPrecip) + labs(title = "Partial Autocorrelation Function") + theme_classic()
+
+grid.arrange(acf.plot, pacf.plot, ncol = 2)
+```
+\paragraph{}
+
+Through preliminary exploratory analysis, we make note of several observations. Firstly, there is a weak positive correlation between the ENSO indicator and the amount of winter precipitation; specifically, $r = 0.196$, a value corroborated by the large and inconsistent spread of data points in the scatter plot depicting the relationship. There does not appear to be a strong linear relationship between SON ONI and winter precipitation, and having labeled the ten wettest winters over the past 75 years, they are preceded by varying degrees of SON ONI anomalies, demonstrating no initial relationship even at the extremes. The positive nature of the relationship does suggest that El Niño events of higher SON ONI anomaly values are associated with wetter winters, but not to a significant extent (a correlation test produces a p value equivalent to 0.08993, which is insignificant at $\alpha = 0.05$). The time series themselves, however, show peaks and troughs of SON ONI and winter precipitation occurring in similar years, but perhaps not exactly in the preceding autumn to the winter cycle. The winter precipitation time series shows a lot of year-to-year variability, but lacks any obvious long-term trends, suggesting it is stationary, a belief that is supported by the immediate decay of autocorrelation between winters in the ACF and PACF visualisations in Figure 2. The SON ONI time series highlights the 2-7 year cyclical nature of El Niño and La Niña events, and does not exhibit any long term drift. The distribution of winter precipitation is centred at about 11.5 inches and is heavily right skewed, highlighting the more extreme wet winters over the past 75 years, and the distribution of SON ONI anomalies is centred around 0 and is fairly symmetric; if anything, it is slightly right skewed to reflect climate change's impact on making El Niño events increasingly extreme. Lastly, a boxplot demonstrating winter precipitation across the three phases of ENSO implies that El Niño events have a higher median amount of precipitation (13.8 inches) than La Niña events (9.82 inches) and neutral phase periods (10.1 inches) as well as a higher mean amount of precipitation (El Niño: 13.3 inches, La Niña: 10.8 inches, Neutral: 10.8 inches). However, there is also more variability in El Niño event winters, which have a larger IQR (El Niño: 6.82 inches, La Niña: 5.87 inches, Neutral: 3.88 inches) and standard deviation (El Niño: 5.00 inches, La Niña: 4.88 inches, Neutral: 3.94 inches) than the other two phases, and the distribution of the three different phases overlap significantly as visualised by the box plots, making it difficult to initially determine that El Niño winters are correlated with substantially wetter outcomes. 
+
+**3. Statistical Methods and Results**
+\paragraph{}
+To further explore whether El Niño forecasts are associated with wetter winters in California, we will move beyond initial exploratory analysis and make use of statistical modelling to assess predictive power. As a baseline, we initially fit a simple linear regression model $Y_{t} = \beta_{0} + \beta_{1}ONI_{t} + \epsilon_{t}$ on the winter precipitation amount using SON ONI as the predictor, and observe that there is no significant relationship between the response and predictor ($\beta_{ONI} = 0.9383$, $SE_{ONI} = 0.5461$, $p$ = 0.0899), as described earlier with the correlation significance test. The $R^2$ is 0.03837, meaning that SON ONI explains just 3.837% of the variance in California winter precipitation, indicating weak explanatory power. However, the relationship between the two variables need not be linear for there to be predictive information held within the ENSO indicator, so we proceed by utilising two time series models; first, we make use of an ARIMA model $Y_{t} = f(Y_{t-1}, Y_{t-2},...) + \epsilon_{t}$, using only the past precipitation values to predict future ones, and then we make use of an ARIMAX model with SON ONI as an exogenous input, changing the equation to $Y_{t} = \beta_{0} + \beta_{1}ONI_{t} + \eta_{t} + \epsilon_{t}$, where $\eta_{t} \sim ARIMA(p, d, q)$. 
+
+```{r, echo = FALSE, warning = FALSE, message = FALSE, fig.height = 6, fig.width = 12, fig.cap = "Diagnostic plots for the ARIMAX model demonstrate that the fit of the model is adequate, and the remaining residuals are effectively distributed as white noise."}
+# baseline model of just linear regression 
+baseline_model <- lm(WinterPrecip ~ SON_ONI, data = final.data)
+# summary(baseline_model)
+
+# baseline time series arima model
+arima_model <- auto.arima(final.data$WinterPrecip, test = "kpss")
+# summary(arima_model)
+# checkresiduals(arima_model)
+
+# arimax model with ENSO included
+arimax_model <- auto.arima(final.data$WinterPrecip, xreg = final.data$SON_ONI, test = "kpss")
+# summary(arimax_model)
+invisible(capture.output(checkresiduals(arimax_model)))
+
+# state space model
+library(KFAS)
+
+y <- final.data$WinterPrecip
+x <- final.data$SON_ONI
+
+model_kf <- SSModel(y ~ SSMtrend(1, Q = NA) + SSMregression(~ x, Q = NA), H = NA)
+
+fit_kf <- fitSSM(model_kf, inits = c(0, 0, 0))
+# fit_kf
+kfs <- KFS(fit_kf$model)
+# kfs
+```
+\paragraph{}
+The ARIMA baseline model selected zero autoregressive and moving average terms, as well as zero differenced terms. In other words, the process of California winter precipitation behaves approximately as white noise with a mean of 11.56 inches, so precipitation is not able to be predicted from its own past values alone. Also, there is no strong evidence of autocorrelation in California winter precipitation at the annual scale, a fact highlighted by the Ljung-Box test having a p-value of 0.82. The fit of the model is confirmed by diagnostic plots for both the ARIMA and ARIMAX models, the latter shown in Figure 3. We see that residuals centre around zero in the time series, there are no significant lag concerns in the autocorrelation function, and the residuals are approximately normally distributed. 
+The ARIMAX model also selected ARIMA(0, 0, 0) in addition to the exogenous input, reducing the model to a regression with white noise errors. We note that the AIC of the ARIMAX model with SON ONI included is slightly lower than the ARIMA model (ARIMAX: 452.55, ARIMA: 453.52), as is the RMSE (ARIMAX: 4.57, ARIMA: 4.66), which indicates a slight improvement in predictive power when the ENSO information is included. The coefficient for SON ONI is 0.94, a positive value which suggests that for every 1°C increase in SON ONI, there is an associated 0.94 inch increase in the California winter precipitation on average, although once again, this coefficient is insignificant at $\alpha = 0.05$ due to large standard errors. The residual diagnostics also improve marginally when SON ONI is included in the model, with the Ljung-Box test producing a p-value of 0.52, and thus the residuals remain white noise. Overall, therefore, while inclusion of SON ONI demonstrates a marginal improvement in forecast accuracy, the effect size is small and statistically uncertain, suggesting limited but non-negligible predictive value for seasonal planning purposes.
+\paragraph{}
+These results motivate the use of a Kalman filter state-space model to assess if the relationship between SON ONI and California winter precipitation varies across time, with observation equation $Y_{t} = \mu{t} + \beta ONI_{t} + \epsilon_{t}$ and state equation $\mu_{t} = \mu_{t-1} + \eta_{t}$, with $\eta_{t}$ the state innovation noise, and $\mu_{t}$ the unobserved precipitation level. This model allows the underlying mean precipitation level to evolve over time, while simultaneously evaluating whether incorporating ENSO improves the explanation of that latent process. The state-space model subsequently yields results that are closely aligned with those obtained from the ARIMAX model, providing little evidence that a more complex, dynamic structure improves explanatory or predictive performance. In particular, the estimated ENSO coefficient and standard error are consistent with ARIMAX estimates ($\beta_{SON_t} = 0.938$, $SE_{SON_t} = 0.546), indicating that the relationship between SON ONI and California winter precipitation is weak but persistent across model formulations. The estimated latent level of precipitation (around 11.5 inches) is also consistent with the mean from simpler models, reinforcing the conclusion that winter precipitation behaves largely as a stationary, noise-dominated process with limited temporal dependence. Importantly, the state-space model does not reveal meaningful time variation in the ENSO effect, suggesting that the strength of the ENSO–precipitation relationship is structurally stable over the sample period rather than evolving through time. Taken together, these results imply that while ENSO contains some linear predictive information, this signal is modest and does not appear to be enhanced by allowing for dynamic or time-varying effects.
+
+```{r, echo = FALSE, message = FALSE, warning = FALSE, fig.height = 4, fig.width = 8, fig.cap = "Predicted probability plots of the logistic regression models; on the left, the plot for predicting extreme wet winters using the SON ONI anomaly values, and on the right, the plot for predicting extreme wet winters using a binary indicator variable describing the presence of an El Niño event."}
+# logistic regression models 
+threshold <- quantile(final.data$WinterPrecip, 0.90)
+ElNino <- ifelse(final.data$SON_ONI >= 0.5, 1, 0)
+final.data$ExtremeWet <- ifelse(final.data$WinterPrecip > threshold, 1, 0)
+log_model <- glm(ExtremeWet ~ SON_ONI, family = binomial, data = final.data)
+# summary(log_model)
+log_model2 <- glm(ExtremeWet ~ ElNino, family = binomial, data = final.data)
+# summary(log_model2)
+
+final.data$pred_prob <- predict(log_model, type = "response")
+final.data$pred_prob2 <- predict(log_model2, type = "response")
+pred.prob1 <- ggplot(final.data, aes(x = SON_ONI, y = pred_prob)) + geom_point() + geom_smooth(se = TRUE) + theme_classic() + labs(x = "SON ONI Anomaly (°C)", y = "P(Extreme Wet Winter)", title = "Predicted Probability of Extreme Wet Winter Across SON ONI Values")
+pred.prob2 <- ggplot(final.data, aes(x = factor(ElNino), y = pred_prob2)) + geom_jitter(width = 0.1, height = 0, alpha = 0.6) + stat_summary(fun = mean, geom = "point", size = 4, color = "deeppink") + labs(x = "El Niño (SON ONI ≥ 0.5)", y = "P(Extreme Wet Winter)", title = "Predicted Probability of Extreme Wet Winters During El Niño vs Non-El Niño Years") + theme_classic()
+grid.arrange(pred.prob1, pred.prob2, nrow = 1)
+```
+
+\paragraph{} Given the consistently weak but stable linear relationship identified across both regression-based and state-space approaches, a natural next step is to consider whether ENSO’s predictive value may be concentrated not in its average effect, but in its extremes. In other words, rather than expecting SON ONI to improve forecasts of typical winter precipitation, it may be more informative to examine whether unusually strong El Niño events disproportionately influence the likelihood of extreme wet winters in California. This motivates a shift in focus from the previous modeling approaches toward understanding tail behaviour, and so we utilise logistic regression and extreme value modeling to explicitly test whether the magnitude of ENSO anomalies enhances predictive skill for extreme precipitation outcomes. First, we look at two logistic regression models to investigate whether we can predict extremely wet winters (defined as within the top 10% of precipitation across all winters) using ENSO anomalies; the first model uses the SON ONI values as the predictor, whereas the second uses an El Niño indicator variable as the predictor. The coefficient produced for SON ONI is 0.297 ($p = 0.441$), but for the El Niño indicator, it is 0.8755 ($p = 0.8755$). In other words, each 1°C increase in SON ONI anomaly is associated with 33\% higher odds of an extreme wet winter, and years with El Niño events have 2.4 times as high odds of an extreme wet winter compared to non-El Niño years. Although the p-values indicate that these are insignificant predictors of extreme wet winters, the positive direction of the effect, and in particular the larger effect size in the second model, does imply that knowing there is an El Niño event may have some predictive ability on the proceeding winter. The predicted probability plots in Figure 4 emphasize this point, and show a trend that increased SON ONI anomalies have a greater probability of extremely wet winters, a trend which is magnified in the binary El Niño indicator case; due to the insignificant p-values, however, we cannot make statistically certain conclusions regarding this relationship. 
+
+```{r, echo = FALSE, message = FALSE, warning = FALSE, fig.height = 6, fig.width = 12, fig.cap = "Diagnostic plots for the generalised extreme value model confirm its validity, with probability and quantile plots exhibiting a fairly tight fit around the diagonal line, the histogram matching the fitted density curve, and the return levels widening with the period but including all points from the dataset."}
+# extreme value models
+library(extRemes)
+winter_max <- final.data %>% group_by(WinterYear) %>% summarise(MaxPrecip = max(WinterPrecip), SON_ONI = mean(SON_ONI)) %>% ungroup()
+gev_fit <- fevd(MaxPrecip ~ SON_ONI, data = winter_max, type = "GEV")
+# summary(gev_fit)
+gev_null <- fevd(MaxPrecip ~ 1, data = winter_max, type = "GEV")
+# summary(gev_null)
+plot(gev_fit)
+# return.level(gev_fit, return.period = c(10, 50, 100))
+
+winter_max <- winter_max %>% mutate(ENSO = case_when(SON_ONI >= 0.5 ~ "ElNino", SON_ONI <= -0.5 ~ "LaNina", TRUE ~ "Neutral"))
+winter_max$ENSO <- factor(winter_max$ENSO, levels = c("LaNina", "Neutral", "ElNino"))
+gev_cat <- fevd(MaxPrecip ~ ENSO, data = winter_max, type = "GEV")
+# summary(gev_cat)
+```
+
+\paragraph{} We finally look at a non-stationary generalised extreme value model to model the annual maximum winter precipitation (tail behaviour of the distribution) as compared to a stationary generalised extreme value model, the latter taking the form $M_t \sim \mathrm{GEV}(\mu, \sigma, \xi)$ and the former $M_t \sim \mathrm{GEV}(\mu_t, \sigma, \xi)$, with $\mu_t = \mu_0 + \beta \cdot \text{ONI}_t$. We find that the stationary and non-stationary models are practically identical in their output for AIC (449.83) and BIC (456.82), as well as the location, scale, and shape parameters of the extreme value distributions, respectively $\mu = 9.5$, $\sigma = 4.00$, and $\xi = -0.09$, and the return levels at 10, 50, and 100 years (10 years: 17.70 inches, 50 years: 22.71 inches, 100 years: 24.61 inches). Through the use of the diagnostic plots in Figure 5, the fit of the model is confirmed and therefore, since the results show no change if we use an ENSO indicator variable describing the phase of ENSO as opposed to the SON ONI anomaly values, ENSO indicators do not prove to be significant predictors of the probability of extremely wet winters, and they do not appear to shift the tail distribution of extreme winter precipitation as well. 
+
+**4. Discussion**
+\paragraph{}
+Across all modelling frameworks considered, a consistent picture emerges: ENSO (as measured by SON ONI) contains only weak and statistically uncertain predictive information for California winter precipitation at the annual scale, so the final recommendation is \textbf{"No, El Niño forecasts do not appear to improve predictions substantially."} We recommend, therefore, that ENSO indicators should not be a primary predictor for California winter precipitation, but could be included in larger models due to their consistent, even if weak and statistically uncertain, positive effect. Having explored different modelling techniques ranging from simple linear regression to state-space and extreme value models, the predictive power of SON ONI is limited throughout the analysis. The ARIMA and ARIMAX models, in particular, showed that winter precipitation behaves approximately as a white-noise process with a stable mean, exhibiting little to no exploitable autocorrelation structure. The inclusion of SON ONI in the ARIMAX model yields only marginal improvements in fit (slightly lower AIC and RMSE), but does not meaningfully alter residual structure, a conclusion reinforced by the Kalman filter state-space model, which was introduced to allow for a potentially time-varying underlying precipitation process and to test whether the ENSO–precipitation relationship evolves over time. Moreover, there is no evidence of meaningful temporal variation in the ENSO effect, implying that the relationship is not strengthening or weakening over the sample period. Rather, ENSO appears to contribute a small, stable linear adjustment to precipitation, but not one that fundamentally changes predictive structure or introduces new dynamics beyond those already captured by simpler models.
+\paragraph{} Given the consistently weak performance of ENSO in explaining mean winter precipitation, attention was shifted toward whether its predictive value might instead lie in the extremes. However, both the logistic regression for extreme wet winters and the non-stationary generalised extreme value (GEV) model lead to the same conclusion: ENSO does not significantly improve the ability to predict or characterise extreme precipitation outcomes. The logistic model shows no statistically significant relationship between SON ONI and the probability of being in the top 10% of wet winters, while the GEV framework indicates that allowing ENSO to influence the location parameter of the extreme distribution does not improve model fit relative to its stationary counterpart. The estimated shape, scale, and location parameters remain identical, and model selection criteria (AIC and BIC) show no meaningful preference for the ENSO-included models. This suggests that ENSO does not substantially shift either the central tendency or the tail behaviour of winter precipitation distributions in California within this dataset.
+\paragraph{} Therefore, the results across regression, time-series, state-space, and extreme value approaches converge on a single conclusion: ENSO has at most a modest linear association with California winter precipitation, but does not provide strong or reliable predictive power, either for typical conditions or for extremes. However, the consistent (if weak) positive direction of the relationship suggests that ENSO may still be useful as one component within a broader multi-predictor framework, particularly when combined with other climate indices or higher-resolution atmospheric variables. Future work could therefore focus on multivariate or nonlinear models, or on subregional and specific event-based analyses where ENSO signals may be more strongly expressed. Another next step could be to look at El Niño indicators measured in other sites, such as Niño 1, 2, 3, and 4, and comparing the predictive power of alternate measurements relative to El Niño 3.4. Lastly, a future direction to take the work in would be to incorporate other variables into the analysis; for example, looking at local atmospheric processes and other climate modes we did not include, as these may dominate year-to-year precipitation variability, effectively obscuring the ENSO signal in the data.
