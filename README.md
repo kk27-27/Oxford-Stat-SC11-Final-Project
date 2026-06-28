@@ -2,10 +2,10 @@
 
 This project investigates whether El Niño–Southern Oscillation (ENSO) indicators 
 (specifically the Oceanic Niño Index, ONI) provide useful predictive information 
-for California winter precipitation. We find that ENSO has a weak positive 
-association with California winter precipitation, the predictive power of ONI is
-statistically weak across models, including ENSO provides only marginal 
-improvements in forecasting performance, and ENSO does not significantly improve
+for California winter precipitation. We find that 1) ENSO has a weak positive 
+association with California winter precipitation, 2) the predictive power of ONI is
+statistically weak across models, 3) including ENSO provides only marginal 
+improvements in forecasting performance, and 4) ENSO does not significantly improve
 the prediction of extreme wet winters. 
 
 ## Data Sources
@@ -17,7 +17,7 @@ the prediction of extreme wet winters.
 
 Overall, ENSO indicators alone do not substantially improve predictive skill for
 California winter precipitation, though they may still provide limited 
-supplementary information in broader forecasting systems; "No, No, El Niño
+supplementary information in broader forecasting systems; "No, El Niño
 forecasts do not appear to improve predictions substantially." 
 
 ## Reproducibility
